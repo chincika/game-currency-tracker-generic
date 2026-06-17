@@ -122,11 +122,11 @@ namespace CurrencyTrackerWinForms
             state = LoadState();
             BuildUi();
             RefreshEverything();
-            BeginInvoke(new MethodInvoker(delegate
+            Shown += delegate
             {
                 ApplyMainSplitterDistance();
                 ApplyLowerSplitterDistance();
-            }));
+            };
         }
 
         private static AppState EmptyState()
@@ -507,8 +507,6 @@ namespace CurrencyTrackerWinForms
                 Orientation = Orientation.Horizontal,
                 SplitterWidth = 7,
                 BackColor = BorderGreen,
-                Panel1MinSize = 190,
-                Panel2MinSize = 230,
             };
             mainSplit.SplitterMoved += (sender, args) => SaveConfigInt("mainSplitter", mainSplit.SplitterDistance);
             mainSplit.HandleCreated += (sender, args) => ApplyMainSplitterDistance();
@@ -522,8 +520,6 @@ namespace CurrencyTrackerWinForms
                 Orientation = Orientation.Vertical,
                 SplitterWidth = 7,
                 BackColor = BorderGreen,
-                Panel1MinSize = 220,
-                Panel2MinSize = 360,
             };
             lowerSplit.SplitterMoved += (sender, args) => SaveConfigInt("lowerSplitter", lowerSplit.SplitterDistance);
             lowerSplit.HandleCreated += (sender, args) => ApplyLowerSplitterDistance();
@@ -545,10 +541,17 @@ namespace CurrencyTrackerWinForms
         private void ApplyMainSplitterDistance()
         {
             if (mainSplit == null || mainSplit.Height <= 0) return;
-            int defaultDistance = Math.Min(350, Math.Max(mainSplit.Panel1MinSize, mainSplit.Height / 3));
+            int minTop = Math.Min(190, Math.Max(50, mainSplit.Height / 5));
+            int minBottom = Math.Min(230, Math.Max(80, mainSplit.Height / 5));
+            if (mainSplit.Height > minTop + minBottom + mainSplit.SplitterWidth)
+            {
+                mainSplit.Panel1MinSize = minTop;
+                mainSplit.Panel2MinSize = minBottom;
+            }
+            int defaultDistance = Math.Min(350, Math.Max(minTop, mainSplit.Height / 3));
             int distance = LoadConfigInt("mainSplitter", defaultDistance);
-            int max = mainSplit.Height - mainSplit.Panel2MinSize - mainSplit.SplitterWidth;
-            distance = Math.Max(mainSplit.Panel1MinSize, Math.Min(distance, max));
+            int max = mainSplit.Height - minBottom - mainSplit.SplitterWidth;
+            distance = Math.Max(minTop, Math.Min(distance, max));
             if (distance > 0 && distance < mainSplit.Height)
             {
                 mainSplit.SplitterDistance = distance;
@@ -558,10 +561,17 @@ namespace CurrencyTrackerWinForms
         private void ApplyLowerSplitterDistance()
         {
             if (lowerSplit == null || lowerSplit.Width <= 0) return;
-            int defaultDistance = Math.Min(320, Math.Max(lowerSplit.Panel1MinSize, lowerSplit.Width / 4));
+            int minLeft = Math.Min(220, Math.Max(80, lowerSplit.Width / 6));
+            int minRight = Math.Min(360, Math.Max(120, lowerSplit.Width / 5));
+            if (lowerSplit.Width > minLeft + minRight + lowerSplit.SplitterWidth)
+            {
+                lowerSplit.Panel1MinSize = minLeft;
+                lowerSplit.Panel2MinSize = minRight;
+            }
+            int defaultDistance = Math.Min(320, Math.Max(minLeft, lowerSplit.Width / 4));
             int distance = LoadConfigInt("lowerSplitter", defaultDistance);
-            int max = lowerSplit.Width - lowerSplit.Panel2MinSize - lowerSplit.SplitterWidth;
-            distance = Math.Max(lowerSplit.Panel1MinSize, Math.Min(distance, max));
+            int max = lowerSplit.Width - minRight - lowerSplit.SplitterWidth;
+            distance = Math.Max(minLeft, Math.Min(distance, max));
             if (distance > 0 && distance < lowerSplit.Width)
             {
                 lowerSplit.SplitterDistance = distance;
