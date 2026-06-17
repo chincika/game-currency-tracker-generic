@@ -23,6 +23,7 @@ https://github.com/chincika/game-currency-tracker-generic/releases
 - 账号或分组改名、换组、删除后，不会影响旧历史记录。
 - 支持按日期、分组、账号查询历史收益。
 - 支持 JSON 备份导出和导入。
+- 支持旧版固定账号 JSON 自动迁移到新版数据结构。
 - 默认数据保存在 AppData，也可以在软件里手动更改数据文件位置。
 - 支持高 DPI 显示，内置金条图标。
 
@@ -38,7 +39,7 @@ https://github.com/chincika/game-currency-tracker-generic/releases
 
 当前数据结构版本为 `schemaVersion: 2`。通用版不会预置固定账号，新数据会从空账号列表开始。
 
-旧的固定账号版数据不自动迁移；如果检测到旧格式，会另存为 legacy 备份，新版从空数据开始。
+旧的固定账号版数据会自动迁移为新版结构。迁移后会生成分组、账号、账号快照和分组快照，保留历史时间、备注、余额和收益。
 
 ## 项目结构
 

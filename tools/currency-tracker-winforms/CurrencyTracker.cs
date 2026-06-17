@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -139,9 +140,13 @@ namespace CurrencyTrackerWinForms
                 if (File.Exists(dataFile))
                 {
                     string json = File.ReadAllText(dataFile, Encoding.UTF8);
-                    AppState loaded = serializer.Deserialize<AppState>(json);
-                    if (loaded != null && loaded.schemaVersion == CurrentSchemaVersion && loaded.groups != null && loaded.accounts != null && loaded.updates != null)
+                    AppState loaded = LoadOrMigrateState(json);
+                    if (loaded != null)
                     {
+                        if (loaded.schemaVersion == CurrentSchemaVersion)
+                        {
+                            WriteState(loaded);
+                        }
                         return NormalizeState(loaded);
                     }
 
@@ -158,6 +163,170 @@ namespace CurrencyTrackerWinForms
             return EmptyState();
         }
 
+        private AppState LoadOrMigrateState(string json)
+        {
+            AppState loaded = serializer.Deserialize<AppState>(json);
+            if (loaded != null && loaded.schemaVersion == CurrentSchemaVersion && loaded.groups != null && loaded.accounts != null && loaded.updates != null)
+            {
+                return loaded;
+            }
+
+            AppState migrated;
+            if (TryMigrateLegacyState(json, out migrated))
+            {
+                return migrated;
+            }
+
+            return null;
+        }
+
+        private bool TryMigrateLegacyState(string json, out AppState migrated)
+        {
+            migrated = null;
+            Dictionary<string, object> root = serializer.Deserialize<Dictionary<string, object>>(json);
+            if (root == null || !root.ContainsKey("accounts") || !root.ContainsKey("updates"))
+            {
+                return false;
+            }
+
+            List<object> legacyAccounts = AsList(root["accounts"]);
+            if (legacyAccounts.Count == 0)
+            {
+                migrated = EmptyState();
+                return true;
+            }
+
+            List<string> groupNames = new List<string>();
+            foreach (object item in legacyAccounts)
+            {
+                Dictionary<string, object> account = AsDict(item);
+                string groupName = ToText(ValueOrNull(account, "group"));
+                if (string.IsNullOrWhiteSpace(groupName)) groupName = "未分组";
+                if (!groupNames.Contains(groupName)) groupNames.Add(groupName);
+            }
+
+            Dictionary<string, string> groupIdsByName = new Dictionary<string, string>();
+            List<GroupInfo> groups = new List<GroupInfo>();
+            for (int i = 0; i < groupNames.Count; i++)
+            {
+                string id = "g" + (i + 1).ToString("00");
+                groupIdsByName[groupNames[i]] = id;
+                groups.Add(new GroupInfo { id = id, name = groupNames[i], sortOrder = i });
+            }
+
+            List<AccountInfo> accounts = new List<AccountInfo>();
+            Dictionary<string, Dictionary<string, object>> legacyAccountById = new Dictionary<string, Dictionary<string, object>>();
+            for (int i = 0; i < legacyAccounts.Count; i++)
+            {
+                Dictionary<string, object> account = AsDict(legacyAccounts[i]);
+                string id = ToText(ValueOrNull(account, "id"));
+                if (string.IsNullOrWhiteSpace(id)) id = "a" + (i + 1).ToString("00");
+                string groupName = ToText(ValueOrNull(account, "group"));
+                if (string.IsNullOrWhiteSpace(groupName)) groupName = "未分组";
+                string name = ToText(ValueOrNull(account, "name"));
+                if (string.IsNullOrWhiteSpace(name)) name = "账号" + (i + 1).ToString();
+                legacyAccountById[id] = account;
+                accounts.Add(new AccountInfo { id = id, groupId = groupIdsByName[groupName], name = name, sortOrder = i });
+            }
+
+            List<UpdateRecord> updates = new List<UpdateRecord>();
+            foreach (object item in AsList(root["updates"]))
+            {
+                Dictionary<string, object> record = AsDict(item);
+                Dictionary<string, object> balances = AsDict(ValueOrNull(record, "balances"));
+                Dictionary<string, object> deltas = AsDict(ValueOrNull(record, "deltas"));
+                Dictionary<string, object> groupTotals = AsDict(ValueOrNull(record, "groupTotals"));
+                Dictionary<string, object> groupDeltas = AsDict(ValueOrNull(record, "groupDeltas"));
+
+                List<AccountSnapshot> accountSnapshots = new List<AccountSnapshot>();
+                foreach (AccountInfo account in accounts.OrderBy(a => a.sortOrder))
+                {
+                    Dictionary<string, object> legacyAccount = legacyAccountById[account.id];
+                    string groupName = ToText(ValueOrNull(legacyAccount, "group"));
+                    if (string.IsNullOrWhiteSpace(groupName)) groupName = "未分组";
+                    int balance = balances.ContainsKey(account.id) ? ToInt(balances[account.id]) : ToInt(ValueOrNull(legacyAccount, "balance"));
+                    int delta = deltas.ContainsKey(account.id) ? ToInt(deltas[account.id]) : 0;
+                    accountSnapshots.Add(new AccountSnapshot
+                    {
+                        accountId = account.id,
+                        accountName = account.name,
+                        groupId = account.groupId,
+                        groupName = groupName,
+                        balance = balance,
+                        delta = delta,
+                    });
+                }
+
+                List<GroupSnapshot> groupSnapshots = new List<GroupSnapshot>();
+                foreach (GroupInfo group in groups.OrderBy(g => g.sortOrder))
+                {
+                    List<AccountSnapshot> inGroup = accountSnapshots.Where(a => a.groupId == group.id).ToList();
+                    int balance = groupTotals.ContainsKey(group.name) ? ToInt(groupTotals[group.name]) : inGroup.Sum(a => a.balance);
+                    int delta = groupDeltas.ContainsKey(group.name) ? ToInt(groupDeltas[group.name]) : inGroup.Sum(a => a.delta);
+                    groupSnapshots.Add(new GroupSnapshot
+                    {
+                        groupId = group.id,
+                        groupName = group.name,
+                        balance = balance,
+                        delta = delta,
+                    });
+                }
+
+                updates.Add(new UpdateRecord
+                {
+                    id = ToText(ValueOrNull(record, "id")),
+                    at = ToText(ValueOrNull(record, "at")),
+                    note = ToText(ValueOrNull(record, "note")),
+                    accountSnapshots = accountSnapshots,
+                    groupSnapshots = groupSnapshots,
+                    totalBalance = record.ContainsKey("totalBalance") ? ToInt(record["totalBalance"]) : accountSnapshots.Sum(a => a.balance),
+                    totalDelta = record.ContainsKey("totalDelta") ? ToInt(record["totalDelta"]) : accountSnapshots.Sum(a => a.delta),
+                });
+            }
+
+            migrated = new AppState
+            {
+                schemaVersion = CurrentSchemaVersion,
+                groups = groups,
+                accounts = accounts,
+                updates = updates,
+            };
+            return true;
+        }
+
+        private static List<object> AsList(object value)
+        {
+            if (value == null) return new List<object>();
+            ArrayList arrayList = value as ArrayList;
+            if (arrayList != null) return arrayList.Cast<object>().ToList();
+            object[] array = value as object[];
+            if (array != null) return array.ToList();
+            return new List<object>();
+        }
+
+        private static Dictionary<string, object> AsDict(object value)
+        {
+            Dictionary<string, object> dict = value as Dictionary<string, object>;
+            return dict ?? new Dictionary<string, object>();
+        }
+
+        private static object ValueOrNull(Dictionary<string, object> dict, string key)
+        {
+            return dict != null && dict.ContainsKey(key) ? dict[key] : null;
+        }
+
+        private static string ToText(object value)
+        {
+            return value == null ? "" : Convert.ToString(value);
+        }
+
+        private static int ToInt(object value)
+        {
+            if (value == null) return 0;
+            int number;
+            return int.TryParse(Convert.ToString(value), out number) ? number : 0;
+        }
+
         private AppState NormalizeState(AppState loaded)
         {
             loaded.groups = loaded.groups.OrderBy(g => g.sortOrder).ThenBy(g => g.name).ToList();
@@ -167,9 +336,14 @@ namespace CurrencyTrackerWinForms
 
         private void SaveState()
         {
+            WriteState(state);
+        }
+
+        private void WriteState(AppState target)
+        {
             Directory.CreateDirectory(Path.GetDirectoryName(dataFile));
-            state.schemaVersion = CurrentSchemaVersion;
-            string json = serializer.Serialize(state);
+            target.schemaVersion = CurrentSchemaVersion;
+            string json = serializer.Serialize(target);
             File.WriteAllText(dataFile, PrettyJson(json), Encoding.UTF8);
         }
 
@@ -776,8 +950,8 @@ namespace CurrencyTrackerWinForms
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
             try
             {
-                AppState loaded = serializer.Deserialize<AppState>(File.ReadAllText(dialog.FileName, Encoding.UTF8));
-                if (loaded == null || loaded.schemaVersion != CurrentSchemaVersion || loaded.groups == null || loaded.accounts == null || loaded.updates == null)
+                AppState loaded = LoadOrMigrateState(File.ReadAllText(dialog.FileName, Encoding.UTF8));
+                if (loaded == null || loaded.groups == null || loaded.accounts == null || loaded.updates == null)
                 {
                     throw new Exception("备份格式不兼容。新版只接受通用化后的 schemaVersion 2 数据。");
                 }
