@@ -62,4 +62,4 @@ https://github.com/chincika/game-currency-tracker-generic/releases
 
 ## 后续更新
 
-后续正式版本会通过 GitHub Releases 发布，并上传对应的 `金条更新记录.exe`。
+后续正式版本会通过 GitHub Releases 发布，并上传对应的 Windows exe 附件。
