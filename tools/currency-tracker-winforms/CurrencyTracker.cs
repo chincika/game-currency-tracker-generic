@@ -97,6 +97,8 @@ namespace CurrencyTrackerWinForms
         private AppState state;
 
         private TableLayoutPanel root;
+        private SplitContainer mainSplit;
+        private SplitContainer lowerSplit;
         private readonly Dictionary<string, TextBox> accountInputs = new Dictionary<string, TextBox>();
         private readonly Label totalLabel = new Label();
         private readonly Label draftGainLabel = new Label();
@@ -120,6 +122,11 @@ namespace CurrencyTrackerWinForms
             state = LoadState();
             BuildUi();
             RefreshEverything();
+            BeginInvoke(new MethodInvoker(delegate
+            {
+                ApplyMainSplitterDistance();
+                ApplyLowerSplitterDistance();
+            }));
         }
 
         private static AppState EmptyState()
@@ -377,7 +384,44 @@ namespace CurrencyTrackerWinForms
         private void SaveDataFilePath()
         {
             Directory.CreateDirectory(Path.GetDirectoryName(configFile));
-            Dictionary<string, string> config = new Dictionary<string, string> { { "dataFile", dataFile } };
+            Dictionary<string, string> config = ReadConfig();
+            config["dataFile"] = dataFile;
+            File.WriteAllText(configFile, PrettyJson(serializer.Serialize(config)), Encoding.UTF8);
+        }
+
+        private Dictionary<string, string> ReadConfig()
+        {
+            try
+            {
+                if (File.Exists(configFile))
+                {
+                    Dictionary<string, string> config = serializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(configFile, Encoding.UTF8));
+                    if (config != null) return config;
+                }
+            }
+            catch
+            {
+            }
+            return new Dictionary<string, string>();
+        }
+
+        private int LoadConfigInt(string key, int fallback)
+        {
+            Dictionary<string, string> config = ReadConfig();
+            int value;
+            if (config.ContainsKey(key) && int.TryParse(config[key], out value) && value > 0)
+            {
+                return value;
+            }
+            return fallback;
+        }
+
+        private void SaveConfigInt(string key, int value)
+        {
+            if (value <= 0) return;
+            Dictionary<string, string> config = ReadConfig();
+            config[key] = value.ToString();
+            Directory.CreateDirectory(Path.GetDirectoryName(configFile));
             File.WriteAllText(configFile, PrettyJson(serializer.Serialize(config)), Encoding.UTF8);
         }
 
@@ -431,10 +475,9 @@ namespace CurrencyTrackerWinForms
             Height = 980;
             MinimumSize = new Size(1120, 860);
 
-            root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(18), RowCount = 5, ColumnCount = 1, BackColor = PageBg };
+            root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(18), RowCount = 4, ColumnCount = 1, BackColor = PageBg };
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 66));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 100));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 350));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
             Controls.Add(root);
@@ -458,17 +501,37 @@ namespace CurrencyTrackerWinForms
             AddMetric(metrics, "账号数量", accountCountLabel, 3);
 
             GroupBox editor = new GroupBox { Text = "手动更新", Dock = DockStyle.Fill, Padding = new Padding(12), BackColor = CardBg, ForeColor = TextDark };
-            root.Controls.Add(editor, 0, 2);
+            mainSplit = new SplitContainer
+            {
+                Dock = DockStyle.Fill,
+                Orientation = Orientation.Horizontal,
+                SplitterWidth = 7,
+                BackColor = BorderGreen,
+                Panel1MinSize = 190,
+                Panel2MinSize = 230,
+            };
+            mainSplit.SplitterMoved += (sender, args) => SaveConfigInt("mainSplitter", mainSplit.SplitterDistance);
+            mainSplit.HandleCreated += (sender, args) => ApplyMainSplitterDistance();
+            root.Controls.Add(mainSplit, 0, 2);
+            mainSplit.Panel1.Controls.Add(editor);
             BuildEditor(editor);
 
-            TableLayoutPanel lower = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, BackColor = PageBg };
-            lower.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 26));
-            lower.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 74));
-            root.Controls.Add(lower, 0, 3);
+            lowerSplit = new SplitContainer
+            {
+                Dock = DockStyle.Fill,
+                Orientation = Orientation.Vertical,
+                SplitterWidth = 7,
+                BackColor = BorderGreen,
+                Panel1MinSize = 220,
+                Panel2MinSize = 360,
+            };
+            lowerSplit.SplitterMoved += (sender, args) => SaveConfigInt("lowerSplitter", lowerSplit.SplitterDistance);
+            lowerSplit.HandleCreated += (sender, args) => ApplyLowerSplitterDistance();
+            mainSplit.Panel2.Controls.Add(lowerSplit);
             Panel summaryPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 0, 8, 0), BackColor = PageBg };
             Panel historyPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(8, 0, 0, 0), BackColor = PageBg };
-            lower.Controls.Add(summaryPanel, 0, 0);
-            lower.Controls.Add(historyPanel, 1, 0);
+            lowerSplit.Panel1.Controls.Add(summaryPanel);
+            lowerSplit.Panel2.Controls.Add(historyPanel);
             BuildCurrentSummary(summaryPanel);
             BuildHistory(historyPanel);
 
@@ -476,7 +539,33 @@ namespace CurrencyTrackerWinForms
             statusLabel.TextAlign = ContentAlignment.MiddleLeft;
             statusLabel.ForeColor = TextMuted;
             statusLabel.BackColor = PageBg;
-            root.Controls.Add(statusLabel, 0, 4);
+            root.Controls.Add(statusLabel, 0, 3);
+        }
+
+        private void ApplyMainSplitterDistance()
+        {
+            if (mainSplit == null || mainSplit.Height <= 0) return;
+            int defaultDistance = Math.Min(350, Math.Max(mainSplit.Panel1MinSize, mainSplit.Height / 3));
+            int distance = LoadConfigInt("mainSplitter", defaultDistance);
+            int max = mainSplit.Height - mainSplit.Panel2MinSize - mainSplit.SplitterWidth;
+            distance = Math.Max(mainSplit.Panel1MinSize, Math.Min(distance, max));
+            if (distance > 0 && distance < mainSplit.Height)
+            {
+                mainSplit.SplitterDistance = distance;
+            }
+        }
+
+        private void ApplyLowerSplitterDistance()
+        {
+            if (lowerSplit == null || lowerSplit.Width <= 0) return;
+            int defaultDistance = Math.Min(320, Math.Max(lowerSplit.Panel1MinSize, lowerSplit.Width / 4));
+            int distance = LoadConfigInt("lowerSplitter", defaultDistance);
+            int max = lowerSplit.Width - lowerSplit.Panel2MinSize - lowerSplit.SplitterWidth;
+            distance = Math.Max(lowerSplit.Panel1MinSize, Math.Min(distance, max));
+            if (distance > 0 && distance < lowerSplit.Width)
+            {
+                lowerSplit.SplitterDistance = distance;
+            }
         }
 
         private void AddTopButton(Control parent, string text, EventHandler handler, int rightOffset, int width)
