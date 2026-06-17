@@ -1,34 +1,36 @@
-# Gold Bar Tracker WinForms App
+# WinForms 桌面版
 
-This is the recommended Windows desktop version of the tracker.
+这是通用游戏货币记录工具的 Windows 桌面版本。
 
-## Run
+## 运行
 
-Open:
+打开：
 
 `dist/金条更新记录.exe`
 
-## Current Version
+## 当前版本说明
 
-The app is now generalized. It no longer has built-in fixed accounts or fixed groups. Use `账号管理` to add groups and accounts before the first update.
+当前版本已经通用化，不再内置固定账号或固定分组。
 
-Historical records store snapshots of account names, group names, balances, and gains at the time of each update. Later rename, regroup, or delete actions do not rewrite old records.
+首次使用时，请点击软件右上角的 `账号管理`，先添加分组和账号，再进行余额更新。
 
-## Data Storage
+历史记录会保存每次更新时的账号名、分组名、余额和收益快照。后续改名、换组或删除账号，不会改写旧历史记录。
 
-Default data file:
+## 数据存储
+
+默认数据文件：
 
 `%APPDATA%\GameCurrencyTracker\currency_records.json`
 
-The selected data location is stored in:
+数据位置设置文件：
 
 `%APPDATA%\GameCurrencyTracker\settings.json`
 
-Click `数据位置` in the app to choose another JSON data file path. The app copies the current data to the new location.
+点击软件中的 `数据位置` 可以选择新的 JSON 数据文件路径。软件会把当前数据复制到新位置。
 
-## Source
+## 源码文件
 
-- `CurrencyTracker.cs`: WinForms source.
-- `assets/app-icon.ico`: Windows app icon.
-- `scripts/make_icon.py`: icon-generation helper.
-- `app.manifest`: high-DPI manifest used when compiling the exe.
+- `CurrencyTracker.cs`：WinForms 主源码。
+- `assets/app-icon.ico`：Windows 程序图标。
+- `scripts/make_icon.py`：图标生成辅助脚本。
+- `app.manifest`：高 DPI manifest。
