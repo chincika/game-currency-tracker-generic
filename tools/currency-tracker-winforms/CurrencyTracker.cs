@@ -703,6 +703,7 @@ namespace CurrencyTrackerWinForms
                 AddSummaryRow(table, group.name, Fmt(CurrentGroupTotal(group.id)), false);
             }
             AddSummaryRow(table, "总计", Fmt(CurrentInputTotal()), true);
+            AddSummaryRow(table, "本周总收益", FmtGain(CurrentWeekTotalDelta()), true);
         }
 
         private void AddSummaryRow(TableLayoutPanel table, string label, string valueText, bool total)
@@ -761,10 +762,14 @@ namespace CurrencyTrackerWinForms
 
         private void AddChartTab(TabControl tabs)
         {
-            TabPage page = new TabPage("周收益图");
+            TabPage page = new TabPage("收益图表");
             Panel panel = new Panel { Dock = DockStyle.Fill, BackColor = CardBg, Padding = new Padding(8) };
             FlowLayoutPanel tools = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 42, FlowDirection = FlowDirection.RightToLeft, WrapContents = false, BackColor = CardBg };
-            Button openLarge = new Button { Text = "打开大图", Width = 104, Height = 32 };
+            Button openPie = new Button { Text = "打开饼图", Width = 104, Height = 32 };
+            StyleButton(openPie, Color.White, WarmBrown);
+            openPie.Click += (sender, args) => ShowWeeklyPieWindow();
+            tools.Controls.Add(openPie);
+            Button openLarge = new Button { Text = "打开折线大图", Width = 124, Height = 32 };
             StyleButton(openLarge, Color.White, PrimaryGreen);
             openLarge.Click += (sender, args) => ShowWeeklyChartWindow();
             tools.Controls.Add(openLarge);
@@ -802,6 +807,27 @@ namespace CurrencyTrackerWinForms
 
             Legend legend = new Legend("Legend");
             legend.Docking = Docking.Top;
+            legend.Alignment = StringAlignment.Center;
+            legend.BackColor = CardBg;
+            chart.Legends.Add(legend);
+        }
+
+        private void ConfigurePieChart(Chart chart)
+        {
+            chart.Dock = DockStyle.Fill;
+            chart.BackColor = CardBg;
+            chart.BorderlineColor = BorderGreen;
+            chart.ChartAreas.Clear();
+            chart.Legends.Clear();
+            chart.Series.Clear();
+            chart.Titles.Clear();
+
+            ChartArea area = new ChartArea("WeeklySource");
+            area.BackColor = CardBg;
+            chart.ChartAreas.Add(area);
+
+            Legend legend = new Legend("Legend");
+            legend.Docking = Docking.Right;
             legend.Alignment = StringAlignment.Center;
             legend.BackColor = CardBg;
             chart.Legends.Add(legend);
@@ -1042,6 +1068,14 @@ namespace CurrencyTrackerWinForms
                 .ToList();
         }
 
+        private int CurrentWeekTotalDelta()
+        {
+            DateTime currentWeek = WeekEndingSaturday(DateTime.Now);
+            return state.updates
+                .Where(record => IsRecordInWeek(record, currentWeek))
+                .Sum(record => record.totalDelta);
+        }
+
         private void RefreshHistory()
         {
             summaryGrid.Rows.Clear();
@@ -1108,6 +1142,64 @@ namespace CurrencyTrackerWinForms
             largeChart.Margin = new Padding(12);
             chartWindow.Controls.Add(largeChart);
             RefreshWeeklyChart(largeChart, records: FilteredRecords(), selectedGroupId: selectedGroupId, selectedAccountId: selectedAccountId);
+            chartWindow.Show(this);
+        }
+
+        private void ShowWeeklyPieWindow()
+        {
+            Form chartWindow = new Form
+            {
+                Text = "周收益来源饼图",
+                BackColor = PageBg,
+                StartPosition = FormStartPosition.CenterParent,
+                Width = 980,
+                Height = 720,
+                MinimumSize = new Size(780, 540),
+                Icon = Icon
+            };
+
+            Panel panel = new Panel { Dock = DockStyle.Fill, BackColor = CardBg, Padding = new Padding(12) };
+            TableLayoutPanel layout = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 1, BackColor = CardBg };
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));
+            panel.Controls.Add(layout);
+
+            FlowLayoutPanel tools = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 44, WrapContents = false, BackColor = CardBg };
+            tools.Controls.Add(new Label { Text = "结算周", AutoSize = true, Padding = new Padding(0, 8, 0, 0), ForeColor = TextMuted, BackColor = CardBg });
+            ComboBox pieWeekFilter = new ComboBox { Width = 180, DropDownStyle = ComboBoxStyle.DropDownList };
+            tools.Controls.Add(pieWeekFilter);
+            tools.Controls.Add(new Label { Text = "查看", AutoSize = true, Padding = new Padding(16, 8, 0, 0), ForeColor = TextMuted, BackColor = CardBg });
+            ComboBox pieModeFilter = new ComboBox { Width = 120, DropDownStyle = ComboBoxStyle.DropDownList };
+            tools.Controls.Add(pieModeFilter);
+
+            Chart pieChart = new Chart();
+            ConfigurePieChart(pieChart);
+            Label pieTotalLabel = new Label
+            {
+                Dock = DockStyle.Bottom,
+                Height = 64,
+                TextAlign = ContentAlignment.MiddleRight,
+                Font = new Font(Font.FontFamily, 20F, FontStyle.Bold),
+                ForeColor = Color.FromArgb(218, 67, 45),
+                BackColor = CardBg,
+                Padding = new Padding(0, 0, 42, 0)
+            };
+
+            layout.Controls.Add(tools, 0, 0);
+            layout.Controls.Add(pieChart, 0, 1);
+            layout.Controls.Add(pieTotalLabel, 0, 2);
+            chartWindow.Controls.Add(panel);
+
+            List<UpdateRecord> records = FilteredRecords();
+            RefreshPieWeekFilter(pieWeekFilter, records);
+            pieModeFilter.Items.Clear();
+            pieModeFilter.Items.Add("按组查看");
+            pieModeFilter.Items.Add("按账号查看");
+            pieModeFilter.SelectedIndex = 0;
+            pieWeekFilter.SelectedIndexChanged += (sender, args) => RefreshPieChart(pieChart, pieTotalLabel, pieWeekFilter, pieModeFilter, records);
+            pieModeFilter.SelectedIndexChanged += (sender, args) => RefreshPieChart(pieChart, pieTotalLabel, pieWeekFilter, pieModeFilter, records);
+            chartWindow.Shown += (sender, args) => RefreshPieChart(pieChart, pieTotalLabel, pieWeekFilter, pieModeFilter, records);
             chartWindow.Show(this);
         }
 
@@ -1195,6 +1287,140 @@ namespace CurrencyTrackerWinForms
         {
             int daysUntilSaturday = ((int)DayOfWeek.Saturday - (int)value.DayOfWeek + 7) % 7;
             return value.Date.AddDays(daysUntilSaturday);
+        }
+
+        private void RefreshPieWeekFilter(ComboBox pieWeekFilter, List<UpdateRecord> records)
+        {
+            pieWeekFilter.Items.Clear();
+            foreach (DateTime week in records
+                .Select(record =>
+                {
+                    DateTime at;
+                    return DateTime.TryParse(record.at, out at) ? WeekEndingSaturday(at) : DateTime.MinValue;
+                })
+                .Where(date => date != DateTime.MinValue)
+                .Distinct()
+                .OrderByDescending(date => date))
+            {
+                pieWeekFilter.Items.Add(week.ToString("yyyy-MM-dd"));
+            }
+            if (pieWeekFilter.Items.Count > 0) pieWeekFilter.SelectedIndex = 0;
+        }
+
+        private void RefreshPieChart(Chart pieChart, Label pieTotalLabel, ComboBox pieWeekFilter, ComboBox pieModeFilter, List<UpdateRecord> records)
+        {
+            pieChart.Series.Clear();
+            pieChart.Titles.Clear();
+            pieTotalLabel.Text = "";
+            if (pieWeekFilter.SelectedItem == null)
+            {
+                AddPieEmptyTitle(pieChart, "当前筛选范围内没有可绘制的周收益");
+                return;
+            }
+
+            DateTime selectedWeek;
+            if (!DateTime.TryParse(pieWeekFilter.SelectedItem.ToString(), out selectedWeek))
+            {
+                AddPieEmptyTitle(pieChart, "结算周格式不正确");
+                return;
+            }
+
+            bool byAccount = pieModeFilter.SelectedItem != null && pieModeFilter.SelectedItem.ToString() == "按账号查看";
+            Dictionary<string, int> values = byAccount
+                ? WeeklyAccountDeltas(records, selectedWeek)
+                : WeeklyGroupDeltas(records, selectedWeek);
+            int weekTotal = WeekTotalDelta(records, selectedWeek);
+            pieTotalLabel.Text = "本周总收益：" + FmtGain(weekTotal);
+
+            List<KeyValuePair<string, int>> nonZeroValues = values
+                .Where(item => item.Value != 0)
+                .OrderByDescending(item => Math.Abs(item.Value))
+                .ToList();
+
+            if (nonZeroValues.Count == 0)
+            {
+                AddPieEmptyTitle(pieChart, selectedWeek.ToString("yyyy-MM-dd") + " 没有非零收益来源");
+                return;
+            }
+
+            Series series = new Series(byAccount ? "账号收益来源" : "分组收益来源");
+            series.ChartType = SeriesChartType.Pie;
+            series["PieLabelStyle"] = "Outside";
+            series["PieLineColor"] = "Gray";
+            series.Font = new Font(Font.FontFamily, 9F, FontStyle.Bold);
+            series.LabelForeColor = TextDark;
+            series.ToolTip = "#VALX: #CUSTOMPROPERTY(Delta)";
+
+            foreach (KeyValuePair<string, int> item in nonZeroValues)
+            {
+                int pointIndex = series.Points.AddXY(item.Key, Math.Abs(item.Value));
+                DataPoint point = series.Points[pointIndex];
+                point.Label = item.Key + " " + FmtGain(item.Value);
+                point.LegendText = item.Key;
+                point.SetCustomProperty("Delta", FmtGain(item.Value));
+            }
+
+            pieChart.Series.Add(series);
+            Title title = new Title(selectedWeek.ToString("yyyy-MM-dd") + " 周收益来源 - " + (byAccount ? "按账号" : "按组"));
+            title.ForeColor = TextDark;
+            title.Font = new Font(Font.FontFamily, 12F, FontStyle.Bold);
+            title.Docking = Docking.Top;
+            title.DockedToChartArea = "WeeklySource";
+            title.IsDockedInsideChartArea = false;
+            pieChart.Titles.Add(title);
+        }
+
+        private Dictionary<string, int> WeeklyGroupDeltas(List<UpdateRecord> records, DateTime selectedWeek)
+        {
+            Dictionary<string, int> values = new Dictionary<string, int>();
+            foreach (UpdateRecord record in records.Where(record => IsRecordInWeek(record, selectedWeek)))
+            {
+                foreach (GroupSnapshot group in record.groupSnapshots ?? new List<GroupSnapshot>())
+                {
+                    string key = string.IsNullOrWhiteSpace(group.groupName) ? "未分组" : group.groupName;
+                    if (!values.ContainsKey(key)) values[key] = 0;
+                    values[key] += group.delta;
+                }
+            }
+            return values;
+        }
+
+        private Dictionary<string, int> WeeklyAccountDeltas(List<UpdateRecord> records, DateTime selectedWeek)
+        {
+            Dictionary<string, int> values = new Dictionary<string, int>();
+            foreach (UpdateRecord record in records.Where(record => IsRecordInWeek(record, selectedWeek)))
+            {
+                foreach (AccountSnapshot account in record.accountSnapshots ?? new List<AccountSnapshot>())
+                {
+                    string groupName = string.IsNullOrWhiteSpace(account.groupName) ? "未分组" : account.groupName;
+                    string accountName = string.IsNullOrWhiteSpace(account.accountName) ? "未命名账号" : account.accountName;
+                    string key = groupName + " - " + accountName;
+                    if (!values.ContainsKey(key)) values[key] = 0;
+                    values[key] += account.delta;
+                }
+            }
+            return values;
+        }
+
+        private static int WeekTotalDelta(List<UpdateRecord> records, DateTime selectedWeek)
+        {
+            return records
+                .Where(record => IsRecordInWeek(record, selectedWeek))
+                .Sum(record => record.totalDelta);
+        }
+
+        private static bool IsRecordInWeek(UpdateRecord record, DateTime selectedWeek)
+        {
+            DateTime at;
+            return DateTime.TryParse(record.at, out at) && WeekEndingSaturday(at) == selectedWeek.Date;
+        }
+
+        private void AddPieEmptyTitle(Chart pieChart, string text)
+        {
+            Title empty = new Title(text);
+            empty.ForeColor = TextMuted;
+            empty.Font = new Font(Font.FontFamily, 11F, FontStyle.Regular);
+            pieChart.Titles.Add(empty);
         }
 
         private static int GetGroupDelta(UpdateRecord record, string groupId)
