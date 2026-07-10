@@ -96,6 +96,7 @@ namespace CurrencyTrackerWinForms
         private string dataFile;
         private readonly JavaScriptSerializer serializer = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
         private AppState state;
+        private bool windowBoundsInitialized;
 
         private TableLayoutPanel root;
         private SplitContainer mainSplit;
@@ -123,8 +124,12 @@ namespace CurrencyTrackerWinForms
             dataFile = LoadDataFilePath();
             state = LoadState();
             BuildUi();
+            ApplySavedWindowBounds();
+            windowBoundsInitialized = true;
             SetDefaultHistoryDateRange();
             RefreshEverything();
+            ResizeEnd += (sender, args) => SaveWindowBounds();
+            FormClosing += (sender, args) => SaveWindowBounds();
             Shown += delegate
             {
                 ApplyMainSplitterDistance();
@@ -428,6 +433,80 @@ namespace CurrencyTrackerWinForms
             File.WriteAllText(configFile, PrettyJson(serializer.Serialize(config)), Encoding.UTF8);
         }
 
+        private bool LoadConfigBool(string key, bool fallback)
+        {
+            Dictionary<string, string> config = ReadConfig();
+            bool value;
+            if (config.ContainsKey(key) && bool.TryParse(config[key], out value))
+            {
+                return value;
+            }
+            return fallback;
+        }
+
+        private void SaveWindowBounds()
+        {
+            if (WindowState == FormWindowState.Minimized) return;
+            Rectangle bounds = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+            if (bounds.Width < MinimumSize.Width || bounds.Height < MinimumSize.Height) return;
+
+            Dictionary<string, string> config = ReadConfig();
+            config["windowX"] = bounds.X.ToString();
+            config["windowY"] = bounds.Y.ToString();
+            config["windowWidth"] = bounds.Width.ToString();
+            config["windowHeight"] = bounds.Height.ToString();
+            config["windowMaximized"] = (WindowState == FormWindowState.Maximized).ToString();
+            Directory.CreateDirectory(Path.GetDirectoryName(configFile));
+            File.WriteAllText(configFile, PrettyJson(serializer.Serialize(config)), Encoding.UTF8);
+        }
+
+        private void ApplySavedWindowBounds()
+        {
+            int width = Math.Max(MinimumSize.Width, LoadConfigInt("windowWidth", Width));
+            int height = Math.Max(MinimumSize.Height, LoadConfigInt("windowHeight", Height));
+            int x = LoadConfigInt("windowX", int.MinValue);
+            int y = LoadConfigInt("windowY", int.MinValue);
+
+            Rectangle bounds;
+            if (x == int.MinValue || y == int.MinValue)
+            {
+                bounds = CenteredBounds(width, height);
+            }
+            else
+            {
+                bounds = new Rectangle(x, y, width, height);
+                if (!IsVisibleOnAnyScreen(bounds)) bounds = CenteredBounds(width, height);
+            }
+
+            StartPosition = FormStartPosition.Manual;
+            Bounds = bounds;
+            if (LoadConfigBool("windowMaximized", false))
+            {
+                WindowState = FormWindowState.Maximized;
+            }
+        }
+
+        private static Rectangle CenteredBounds(int width, int height)
+        {
+            Rectangle area = Screen.PrimaryScreen.WorkingArea;
+            width = Math.Min(width, area.Width);
+            height = Math.Min(height, area.Height);
+            return new Rectangle(area.Left + (area.Width - width) / 2, area.Top + (area.Height - height) / 2, width, height);
+        }
+
+        private static bool IsVisibleOnAnyScreen(Rectangle bounds)
+        {
+            foreach (Screen screen in Screen.AllScreens)
+            {
+                Rectangle visible = Rectangle.Intersect(screen.WorkingArea, bounds);
+                if (visible.Width >= 160 && visible.Height >= 120)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         private static string PrettyJson(string json)
         {
             int indent = 0;
@@ -474,9 +553,12 @@ namespace CurrencyTrackerWinForms
             Font = new Font("Microsoft YaHei UI", 9F);
             BackColor = PageBg;
             ForeColor = TextDark;
-            Width = 1240;
-            Height = 980;
             MinimumSize = new Size(1120, 860);
+            if (!windowBoundsInitialized)
+            {
+                Width = 1240;
+                Height = 980;
+            }
 
             root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(18), RowCount = 4, ColumnCount = 1, BackColor = PageBg };
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 66));

@@ -30,6 +30,7 @@ https://github.com/chincika/game-currency-tracker-generic/releases
 - 默认数据保存在 AppData，也可以在软件里手动更改数据文件位置。
 - 支持高 DPI 显示，内置金条图标。
 - 主界面支持拖拽调整模块大小，并会记住用户调整后的布局。
+- 会记住用户上一次关闭时的窗口大小、位置和最大化状态。
 
 ## 数据位置
 
@@ -47,6 +48,7 @@ https://github.com/chincika/game-currency-tracker-generic/releases
 
 ## 近期新增
 
+- `v0.1.6`：新增窗口大小、位置和最大化状态记忆。
 - `v0.1.5`：补齐收益来源饼图、本周总收益模块；饼图支持按组/按账号查看，过滤 0 收益项。
 - `v0.1.4`：新增周收益折线图、折线大图窗口、折线点收益数字；默认历史范围显示完整记录。
 
