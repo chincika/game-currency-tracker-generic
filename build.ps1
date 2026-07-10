@@ -12,7 +12,7 @@ $compiler = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 
 New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
 
-& $compiler /nologo /target:winexe /win32icon:$icon /win32manifest:$manifest /out:$tempOutput /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Web.Extensions.dll $source
+& $compiler /nologo /target:winexe /win32icon:$icon /win32manifest:$manifest /out:$tempOutput /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Web.Extensions.dll /reference:System.Windows.Forms.DataVisualization.dll $source
 Copy-Item -LiteralPath $tempOutput -Destination $output -Force
 Remove-Item -LiteralPath $tempOutput -Force
 

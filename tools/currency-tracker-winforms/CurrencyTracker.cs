@@ -7,6 +7,7 @@ using System.Linq;
 using System.Text;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
+using System.Windows.Forms.DataVisualization.Charting;
 
 namespace CurrencyTrackerWinForms
 {
@@ -112,6 +113,7 @@ namespace CurrencyTrackerWinForms
         private readonly ComboBox accountFilter = new ComboBox();
         private readonly DataGridView summaryGrid = new DataGridView();
         private readonly DataGridView accountGrid = new DataGridView();
+        private readonly Chart weeklyChart = new Chart();
         private readonly Label statusLabel = new Label();
 
         public TrackerForm()
@@ -121,6 +123,7 @@ namespace CurrencyTrackerWinForms
             dataFile = LoadDataFilePath();
             state = LoadState();
             BuildUi();
+            SetDefaultHistoryDateRange();
             RefreshEverything();
             Shown += delegate
             {
@@ -753,6 +756,55 @@ namespace CurrencyTrackerWinForms
             tabs.BringToFront();
             AddTab(tabs, "分组/总收益", summaryGrid, new[] { "时间", "备注", "总收益", "分组收益", "总计余额" });
             AddTab(tabs, "账号明细", accountGrid, new[] { "时间", "分组", "账号", "收益", "更新后", "备注" });
+            AddChartTab(tabs);
+        }
+
+        private void AddChartTab(TabControl tabs)
+        {
+            TabPage page = new TabPage("周收益图");
+            Panel panel = new Panel { Dock = DockStyle.Fill, BackColor = CardBg, Padding = new Padding(8) };
+            FlowLayoutPanel tools = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 42, FlowDirection = FlowDirection.RightToLeft, WrapContents = false, BackColor = CardBg };
+            Button openLarge = new Button { Text = "打开大图", Width = 104, Height = 32 };
+            StyleButton(openLarge, Color.White, PrimaryGreen);
+            openLarge.Click += (sender, args) => ShowWeeklyChartWindow();
+            tools.Controls.Add(openLarge);
+
+            ConfigureWeeklyChart(weeklyChart);
+            panel.Controls.Add(weeklyChart);
+            panel.Controls.Add(tools);
+            tools.BringToFront();
+            page.Controls.Add(panel);
+            tabs.TabPages.Add(page);
+        }
+
+        private void ConfigureWeeklyChart(Chart chart)
+        {
+            chart.Dock = DockStyle.Fill;
+            chart.BackColor = CardBg;
+            chart.BorderlineColor = BorderGreen;
+            chart.ChartAreas.Clear();
+            chart.Legends.Clear();
+            chart.Series.Clear();
+            chart.Titles.Clear();
+
+            ChartArea area = new ChartArea("WeeklyIncome");
+            area.BackColor = CardBg;
+            area.AxisX.MajorGrid.LineColor = Color.FromArgb(230, 236, 228);
+            area.AxisY.MajorGrid.LineColor = Color.FromArgb(230, 236, 228);
+            area.AxisX.LabelStyle.Format = "MM-dd";
+            area.AxisX.IntervalAutoMode = IntervalAutoMode.VariableCount;
+            area.AxisX.Title = "周六结算日";
+            area.AxisY.Title = "收益";
+            area.AxisY.LabelStyle.Format = "N0";
+            area.AxisX.LineColor = BorderGreen;
+            area.AxisY.LineColor = BorderGreen;
+            chart.ChartAreas.Add(area);
+
+            Legend legend = new Legend("Legend");
+            legend.Docking = Docking.Top;
+            legend.Alignment = StringAlignment.Center;
+            legend.BackColor = CardBg;
+            chart.Legends.Add(legend);
         }
 
         private void AddTab(TabControl tabs, string title, DataGridView grid, string[] columns)
@@ -824,6 +876,26 @@ namespace CurrencyTrackerWinForms
             RefreshHistory();
             SaveState();
             statusLabel.Text = "数据文件：" + dataFile;
+        }
+
+        private void SetDefaultHistoryDateRange()
+        {
+            List<DateTime> dates = state.updates
+                .Select(record =>
+                {
+                    DateTime parsed;
+                    return DateTime.TryParse(record.at, out parsed) ? parsed.Date : DateTime.Today;
+                })
+                .ToList();
+
+            DateTime first = dates.Count == 0 ? DateTime.Today : dates.Min();
+            DateTime last = dates.Count == 0 ? DateTime.Today : dates.Max();
+            if (last < DateTime.Today) last = DateTime.Today;
+
+            startDate.Value = first;
+            startDate.Checked = true;
+            endDate.Value = last;
+            endDate.Checked = true;
         }
 
         private void FillCurrentValues()
@@ -979,8 +1051,9 @@ namespace CurrencyTrackerWinForms
             FilterItem accountItem = accountFilter.SelectedItem as FilterItem;
             string selectedGroupId = groupItem == null ? "" : groupItem.Id;
             string selectedAccountId = accountItem == null ? "" : accountItem.Id;
+            List<UpdateRecord> records = FilteredRecords();
 
-            foreach (UpdateRecord record in FilteredRecords())
+            foreach (UpdateRecord record in records)
             {
                 List<GroupSnapshot> groups = (record.groupSnapshots ?? new List<GroupSnapshot>())
                     .Where(g => string.IsNullOrEmpty(selectedGroupId) || g.groupId == selectedGroupId)
@@ -1008,6 +1081,146 @@ namespace CurrencyTrackerWinForms
                         string.IsNullOrWhiteSpace(record.note) ? "无备注" : record.note);
                 }
             }
+
+            RefreshWeeklyChart(weeklyChart, records, selectedGroupId, selectedAccountId);
+        }
+
+        private void ShowWeeklyChartWindow()
+        {
+            FilterItem groupItem = groupFilter.SelectedItem as FilterItem;
+            FilterItem accountItem = accountFilter.SelectedItem as FilterItem;
+            string selectedGroupId = groupItem == null ? "" : groupItem.Id;
+            string selectedAccountId = accountItem == null ? "" : accountItem.Id;
+
+            Form chartWindow = new Form
+            {
+                Text = "周收益折线图",
+                BackColor = PageBg,
+                StartPosition = FormStartPosition.CenterParent,
+                Width = 1120,
+                Height = 760,
+                MinimumSize = new Size(820, 560),
+                Icon = Icon
+            };
+
+            Chart largeChart = new Chart();
+            ConfigureWeeklyChart(largeChart);
+            largeChart.Margin = new Padding(12);
+            chartWindow.Controls.Add(largeChart);
+            RefreshWeeklyChart(largeChart, records: FilteredRecords(), selectedGroupId: selectedGroupId, selectedAccountId: selectedAccountId);
+            chartWindow.Show(this);
+        }
+
+        private void RefreshWeeklyChart(Chart chart, List<UpdateRecord> records, string selectedGroupId, string selectedAccountId)
+        {
+            chart.Series.Clear();
+            chart.Titles.Clear();
+
+            List<UpdateRecord> orderedRecords = records
+                .OrderBy(record =>
+                {
+                    DateTime at;
+                    return DateTime.TryParse(record.at, out at) ? at : DateTime.MinValue;
+                })
+                .ToList();
+
+            if (orderedRecords.Count == 0)
+            {
+                Title empty = new Title("当前筛选范围内没有收益记录");
+                empty.ForeColor = TextMuted;
+                empty.Font = new Font(Font.FontFamily, 11F, FontStyle.Regular);
+                chart.Titles.Add(empty);
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(selectedAccountId))
+            {
+                FilterItem accountItem = HistoricalAccountItems().FirstOrDefault(item => item.Id == selectedAccountId);
+                string accountName = accountItem == null ? "账号收益" : accountItem.Label;
+                AddWeeklySeries(chart, accountName, orderedRecords, record => GetAccountDelta(record, selectedAccountId), PrimaryGreen);
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(selectedGroupId))
+            {
+                FilterItem groupItem = HistoricalGroupItems().FirstOrDefault(item => item.Id == selectedGroupId);
+                string groupName = groupItem == null ? "分组收益" : groupItem.Label;
+                AddWeeklySeries(chart, groupName, orderedRecords, record => GetGroupDelta(record, selectedGroupId), PrimaryGreen);
+                return;
+            }
+
+            AddWeeklySeries(chart, "总收益", orderedRecords, record => record.totalDelta, WarmBrown);
+            foreach (FilterItem group in HistoricalGroupItems())
+            {
+                AddWeeklySeries(chart, group.Label, orderedRecords, record => GetGroupDelta(record, group.Id), SeriesColor(chart.Series.Count));
+            }
+        }
+
+        private void AddWeeklySeries(Chart chart, string name, List<UpdateRecord> records, Func<UpdateRecord, int> selector, Color color)
+        {
+            Dictionary<DateTime, int> weeklyTotals = new Dictionary<DateTime, int>();
+            foreach (UpdateRecord record in records)
+            {
+                DateTime at;
+                if (!DateTime.TryParse(record.at, out at)) continue;
+                DateTime saturday = WeekEndingSaturday(at);
+                if (!weeklyTotals.ContainsKey(saturday)) weeklyTotals[saturday] = 0;
+                weeklyTotals[saturday] += selector(record);
+            }
+
+            Series series = new Series(name);
+            series.ChartType = SeriesChartType.Line;
+            series.BorderWidth = 3;
+            series.MarkerStyle = MarkerStyle.Circle;
+            series.MarkerSize = 7;
+            series.Color = color;
+            series.XValueType = ChartValueType.DateTime;
+            series.IsValueShownAsLabel = true;
+            series.LabelForeColor = TextDark;
+            series.Font = new Font(Font.FontFamily, 8F, FontStyle.Bold);
+            series.ToolTip = "#SERIESNAME\n#VALX{yyyy-MM-dd}: #VALY{N0}";
+
+            foreach (KeyValuePair<DateTime, int> point in weeklyTotals.OrderBy(item => item.Key))
+            {
+                int pointIndex = series.Points.AddXY(point.Key, point.Value);
+                series.Points[pointIndex].Label = FmtGain(point.Value);
+            }
+
+            chart.Series.Add(series);
+            ChartArea area = chart.ChartAreas["WeeklyIncome"];
+            area.RecalculateAxesScale();
+        }
+
+        private static DateTime WeekEndingSaturday(DateTime value)
+        {
+            int daysUntilSaturday = ((int)DayOfWeek.Saturday - (int)value.DayOfWeek + 7) % 7;
+            return value.Date.AddDays(daysUntilSaturday);
+        }
+
+        private static int GetGroupDelta(UpdateRecord record, string groupId)
+        {
+            GroupSnapshot snapshot = (record.groupSnapshots ?? new List<GroupSnapshot>()).FirstOrDefault(group => group.groupId == groupId);
+            return snapshot == null ? 0 : snapshot.delta;
+        }
+
+        private static int GetAccountDelta(UpdateRecord record, string accountId)
+        {
+            AccountSnapshot snapshot = (record.accountSnapshots ?? new List<AccountSnapshot>()).FirstOrDefault(account => account.accountId == accountId);
+            return snapshot == null ? 0 : snapshot.delta;
+        }
+
+        private static Color SeriesColor(int index)
+        {
+            Color[] colors =
+            {
+                PrimaryGreen,
+                Color.FromArgb(37, 99, 235),
+                Color.FromArgb(147, 51, 234),
+                Color.FromArgb(217, 119, 6),
+                Color.FromArgb(14, 116, 144),
+                Color.FromArgb(190, 18, 60),
+            };
+            return colors[Math.Abs(index) % colors.Length];
         }
 
         private void OpenAccountManager(object sender, EventArgs e)
@@ -1027,6 +1240,7 @@ namespace CurrencyTrackerWinForms
         private void RebuildMainUi()
         {
             BuildUi();
+            SetDefaultHistoryDateRange();
             RefreshEverything();
         }
 
